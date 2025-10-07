@@ -1,0 +1,6 @@
+PWD /Users/riyadrajan/Library/CloudStorage/OneDrive-Personal/Concordia/COEN 346/40290831_pa1/unix-shell-riyadrajan/docs/latex
+INPUT /usr/local/texlive/2025/texmf.cnf
+INPUT /usr/local/texlive/2025/texmf-dist/web2c/texmf.cnf
+INPUT /usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt
+INPUT annotated.tex
+OUTPUT annotated.log

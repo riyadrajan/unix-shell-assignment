@@ -1,0 +1,7 @@
+# Fdb version 4
+["pdflatex"] 0 "annotated.tex" "annotated.pdf" "annotated" 0 -1
+  (generated)
+  "annotated.aux"
+  "annotated.log"
+  "annotated.pdf"
+  (rewritten before read)
