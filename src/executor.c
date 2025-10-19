@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/fcntl.h>
-#include <sys/wait.h> //added for wait() call
-#include <sys/types.h> //for pid
+#include <sys/wait.h> // Added for wait() call
+#include <sys/types.h> // Added for pid
 #include <string.h>
 
 #include "executor.h"
@@ -28,23 +28,23 @@ static int next_job_id = 1;
 
 /**
  * @brief Executes a single, simple command in another process
- * @param cmd
- * @param args
- * @param in
- * @param out
- * @param bg
- * @return
+ * @param cmd The command to execute (ls, echo, cat)
+ * @param args The arguments to the command (array of strings)
+ * @param in File descriptor for input redirection
+ * @param out File descriptor for output redirection
+ * @param bg Flag indicating if the command should run in the background
+ * @return Returns EXIT_SUCCESS (0) on successful fork and exec, or EXIT_FAILURE (1) on error
  */
 int execute_command(char* cmd, char** args, int in, int out, int bg) { 
-    //fork a child process
+    // Fork a child process
     pid_t pid = fork();
     if (pid < 0) {
-        //error occured
+        // Error occured
         fprintf(stderr, "Fork Failed");
         return 1;
     } else if (pid == 0){
-        //child process
-        //handle files first
+        /* Child process
+           Handling files first */
         if (in != STDIN_FILENO) {
             dup2(in, STDIN_FILENO);
             close(in);
@@ -58,22 +58,20 @@ int execute_command(char* cmd, char** args, int in, int out, int bg) {
         exit(EXIT_FAILURE);
     } else {
         if (!bg){
-            //if it is a foreground process (no &)
+            // If it is a foreground process (no &)
             wait (NULL);
             printf("Child Complete \n");
         } else {
-            //if it is a background porcess (with the &)
+            // If it is a background process (with the &)
             printf("Background process is running \n");
-            //only add jobs for bg processes
-            add_job(pid, cmd, args);   // add_job should strdup the string
+
+            // Only add jobs for bg processes, add_job() should strdup the string
+            add_job(pid, cmd, args);
             printf("[%d] %d\n", (int)pid, (int)pid);
         }
 
     }
-
     return EXIT_SUCCESS;
-
-
 }
 
 /**
@@ -109,49 +107,48 @@ int execute(struct cmdline *l){
         return EXIT_SUCCESS;
     }
 
-    //execute jobs command if it is called
+    // Execute jobs command if it is called
     char **first = l->seq[0];
     if (first && first[0] && strcmp(first[0], "jobs") == 0) {
         print_jobs();
         return EXIT_SUCCESS;
     }
 
-    //if pipe "|" detected for two commands ONLY, call execute_pipe func 
-    //after adding multpipe function, use count_commands
-    //call mult_pipe if multiple pipes/commands
+    // If pipe "|" detected for two commands ONLY, call execute_pipe function 
+    // After adding multpipe functions, use count_commands
+    // Call mult_pipe if multiple pipes/commands
 
     int pipe_num = count_commands(l);
     if (pipe_num <= 0) return EXIT_SUCCESS;
     if (pipe_num == 2) return execute_pipe(l);
     if (pipe_num > 2)  return mult_pipes(l);
-    //if pipe_num is 1 just continue below as normal
+    // If pipe_num is 1, continue below as normal
 
-    //get first command
+    // Get first command
     char **cmd = l->seq[0];
     // return execute_command(cmd[0], cmd, STDIN_FILENO, STDOUT_FILENO, l->bg);
 
-    int output_fd = wr_to_file(l);  // to open the file (then write)
+    int output_fd = wr_to_file(l);  // to open the file, then write
     int input_fd = rd_from_file(l); // to open the input file
 
     int result = execute_command(cmd[0], cmd, input_fd, output_fd, l->bg );
 
-    //close the files after operations
+    // Close the files after operations
     if (output_fd != STDOUT_FILENO) close(output_fd);
     if (input_fd != STDIN_FILENO) close(input_fd);
 
     return result;
-
 }
 
-//duplicate the command string and add to job
-//use realloc and free to add and remove from storage
+// Duplicate the command string and add to job
+// Use realloc and free to add and remove from storage
 // --------------------------JOBS LOGIC-------------------------------
 
 void add_job(pid_t pid, char* cmd, char** args){
-    //allocate the memory to add jobs
-    //realloc will resize the block to append new jobs
-    //function is void *realloc( void *ptr, size_t new_size );
-    // so to get size of a new job, do number of jobs * the size of one job
+    // Allocate the memory to add jobs
+    // Realloc will resize the block to append new jobs
+    // Function is void *realloc( void *ptr, size_t new_size );
+    // So to get size of a new job, do number of jobs * the size of one job
     job_t *tmp = realloc(jobs, (jobs_count+1) *sizeof(job_t) );
     
     if (!tmp) {
@@ -161,31 +158,31 @@ void add_job(pid_t pid, char* cmd, char** args){
 
     jobs = tmp;
 
-    //Fill in the new jobs
+    // Fill in the new jobs
     jobs[jobs_count].job_id = next_job_id++;
     jobs[jobs_count].pid = pid;
     jobs[jobs_count].state = Running;
-    //check whether cmd is null. If not null then duplicate the cmd string
+    // Check whether cmd is null. If not null then duplicate the cmd string
     // jobs[jobs_count].cmdstr = cmd ? strdup(cmd) : NULL; 
-    //build full string command argument
-    //get total length and allocate memory 
-    //first check null 
+    // Build full string command argument
+    // Get total length and allocate memory 
+    // First check null 
     if (args && args[0]){
         size_t total_len = 0;
         for (int i = 0; args[i]; i++){
             total_len += strlen(args[i]) + 1;
         }
 
-    //copy the full command with strcpy since we allocate memory
+    // Copy the full command with strcpy() since we allocate memory
     char* full_cmd = malloc(total_len);
     if (full_cmd){
-        //strcpy(destination, source)
+        // strcpy(destination, source)
         strcpy(full_cmd, args[0]);
         for (int i = 1; args[i] != NULL; i++){
             strcat(full_cmd, " ");
             strcat(full_cmd,  args[i]);
         }
-        jobs[jobs_count].cmdstr = full_cmd; //copies args as well
+        jobs[jobs_count].cmdstr = full_cmd; // copies args as well
     } else {
         jobs[jobs_count].cmdstr = strdup(cmd);
     }
@@ -200,31 +197,31 @@ void add_job(pid_t pid, char* cmd, char** args){
     jobs_count++;
 }
 
-//clean up jobs not running from the jobs struct
+// Clean up jobs not running from the jobs struct
 void cleanup_finished_jobs() {
     if (jobs_count == 0) return;
 
-    //use rj to represent a running job index
-    //i represents all jobs
+    // Use rj to represent a running job index
+    // i represents all jobs
     size_t rj = 0;
     for (size_t i = 0; i < jobs_count; ++i) {
         int status = 0;
-        //waitpid func info obtained from IBM.com
+        // waitpid() info obtained from IBM.com
         // 0 means the child process is still running
-        //pid means that the process has terminated
+        // pid means that the process has terminated
         pid_t r = waitpid(jobs[i].pid, &status, WNOHANG);
         if (r == 0) {
-            //keep the job if it still running
+            // Keep the job if it still running
             if (rj != i) jobs[rj] = jobs[i];
             jobs[i].state = Running;
             rj++;
         } else if (r == jobs[i].pid) {
-            //free storage if job is finished 
+            // Free storage if job is finished 
             free(jobs[i].cmdstr);
             jobs[i].state = Done;
             
         } else {
-            //keep the job if there is an error (not equal to 0 or pid)
+            // Keep the job if there is an error (not equal to 0 or pid)
             if (rj != i) jobs[rj] = jobs[i];
             jobs[i].state = Stopped;
             rj++;
@@ -237,7 +234,7 @@ void cleanup_finished_jobs() {
         jobs_count = 0;
         next_job_id = 1; // After testing prev version, reset job id for accurate indexing
     } else if (rj != jobs_count) {
-        //resize to the current number of jobs
+        // Resize to the current number of jobs
         job_t *tmp = realloc(jobs, rj * sizeof(job_t));
         if (tmp) jobs = tmp;
         jobs_count = rj;
@@ -269,14 +266,14 @@ void print_jobs(void) {
 }
 
 // --------------------------FILE REDIRECTION LOGIC-------------------------------
-//l->in contains file name for input redirection
-//l-> out for output redirection (write file)
+// l->in contains file name for input redirection
+// l-> out for output redirection (write file)
 
-//write to file should return the file descriptor fd, and should now take input and write to the file
+// Write to file should return the file descriptor fd, and should now take input and write to the file
 int wr_to_file(struct cmdline *l){
     if(l->out){
         int fd = open(l->out, O_WRONLY | O_CREAT | O_TRUNC, 0644); //taken from man7.org
-        //write only to file, or create the file, clear it then write
+        // Write only to file, or create the file, clear it then write
         if (fd == -1){
             fprintf(stderr, "Failed to open the file");
             return -1;
@@ -289,8 +286,8 @@ int wr_to_file(struct cmdline *l){
 
 int rd_from_file(struct cmdline *l){
     if(l->in){
-        int fd = open(l->in, O_RDONLY, 0644); //taken from man7.org
-        //read only from file
+        int fd = open(l->in, O_RDONLY, 0644); // Taken from man7.org
+        // Read only from file
         if (fd == -1){
             fprintf(stderr, "Failed to open the file");
             return -1;
@@ -302,22 +299,20 @@ int rd_from_file(struct cmdline *l){
 }
 
 //---------------------------PIPE (FOR 2 CMDS)---------------------------
-//notes: one end of the pipe writes and the other reads from the pipe (connecting two cmds)
-//write -> pipefd[0]
-//read -> pipefd[1]
+// Notes: one end of the pipe writes and the other reads from the pipe (connecting two cmds)
+// pipefd[0] is the read end
+// pipefd[1] is the write end
 
 /*
-how it works:
-instead of writing to the terminal, write output to a file
-read from file and use for next command
-so we need two process creations in this func
-bypass calling execute_command()
+This function handles a two-command pipeline using a single pipe.
+Each command runs in its own process, with output from the first redirected to the input of the second.
+We bypass execute_command() to manually manage pipe setup and redirection.
 */
 
 int execute_pipe(struct cmdline *l) {
     if (!l || !l->seq || !l->seq[0] || !l->seq[1]) return EXIT_FAILURE;
 
-    //get cmds from seq array
+    // Get cmds from seq array
     char **cmd1 = l->seq[0];
     char **cmd2 = l->seq[1];
     if (cmd1 == NULL || cmd2 == NULL) return EXIT_FAILURE;
@@ -338,8 +333,8 @@ int execute_pipe(struct cmdline *l) {
         return EXIT_FAILURE;
     }
 
-    //only add functionality to child processes
-    //if parent process or otherwise, close files
+    // Only add functionality to child processes
+    // If parent process or otherwise, close files
     pid_t p1 = fork();
     if (p1 < 0) {
         fprintf(stderr, "pipe");
@@ -350,7 +345,7 @@ int execute_pipe(struct cmdline *l) {
         return EXIT_FAILURE;
     }
 
-    //output from cmd1 (so write for pipe)
+    // Output from cmd1 (so write for pipe)
     if (p1 == 0) {
         // Child 1: stdin <- input_fd, stdout -> pipe write end 
         if (input_fd != STDIN_FILENO) {
@@ -358,7 +353,7 @@ int execute_pipe(struct cmdline *l) {
             close(input_fd);
         }
         dup2(pipefd[1], STDOUT_FILENO);
-        //close unused write and close original read
+        // Close unused write and close original read
         close(pipefd[0]); 
         close(pipefd[1]);
         if (output_fd != STDOUT_FILENO) close(output_fd);
@@ -367,7 +362,7 @@ int execute_pipe(struct cmdline *l) {
         exit(EXIT_FAILURE);
     }
 
-    //cleanup for parent, same as above
+    // Cleanup for parent, same as above
     pid_t p2 = fork();
     if (p2 < 0) {
         fprintf(stderr, "pipe");
@@ -378,15 +373,15 @@ int execute_pipe(struct cmdline *l) {
         return EXIT_FAILURE;
     }
 
-    //input for cmd2 (so read from pipe)
+    // Input for cmd2 (so read from pipe)
     if (p2 == 0) {
-        //Child 2: stdin <- pipe read end, stdout -> output_fd 
+        // Child 2: stdin <- pipe read end, stdout -> output_fd 
         if (output_fd != STDOUT_FILENO) {
             dup2(output_fd, STDOUT_FILENO);
             close(output_fd);
         }
         dup2(pipefd[0], STDIN_FILENO);
-        //close unused write and close original read file
+        // Close unused write and close original read file
         close(pipefd[0]); 
         close(pipefd[1]);
         if (input_fd != STDIN_FILENO) close(input_fd);
@@ -395,7 +390,7 @@ int execute_pipe(struct cmdline *l) {
         exit(EXIT_FAILURE);
     }
 
-    //Parent: close fds used for piping and redirection 
+    // Parent: close fds used for piping and redirection 
     close(pipefd[0]); 
     close(pipefd[1]);
     if (input_fd != STDIN_FILENO) close(input_fd);
@@ -405,7 +400,7 @@ int execute_pipe(struct cmdline *l) {
         waitpid(p1, NULL, 0);
         waitpid(p2, NULL, 0);
     } else {
-        //background: add first child as a job
+        // Background: add first child as a job
         printf("Background process is running \n");
         add_job(p1, cmd1[0], cmd1);
         printf("[%d] %d\n", (int)p1, (int)p1);
@@ -416,30 +411,31 @@ int execute_pipe(struct cmdline *l) {
 
 //-------------------------MULTIPLE-PIPE-----------------------
 /*
-note to self: to create multiple pipes, you need to know the amount of commands
-use a loop to determine how many commands or how many pipes
-set up pipeline with the loop 
-create an array stucture of all pipe pairs (fds)
-create a command spawn_command to execute a single command with specified in/out fds
-ensure the child closes all pipe fds that it does not need
+To implement multiple pipes, we :
+- Count the number of commands in the pipeline
+- Use a loop to determine how many commands or pipes
+- Set up pipeline with the loop
+- Create an array stucture of all pipe pairs (fds)
+- Create a command spawn_command to execute a single command with specified in/out fds
+- Ensure the child closes all pipe fds to preven leaks
 */
 
-//count number of commands
-//get size of sequence
+// Count number of commands
+// Get size of sequence
 int count_commands(struct cmdline *l) {
-    //return 0 if cmdline is empty 
+    // Return 0 if cmdline is empty 
     if (!l || !l->seq) return 0;
     int n = 0;
     while (l->seq[n]) ++n;
     return n;
 }
-//if n=2 call execute_pipe()
+// If n = 2, call execute_pipe()
 
 pid_t spawn_command(char **cmd, int in_fd, int out_fd, int bg, int *all_pipes, int all_pipes_len) {
     pid_t pid = fork();
     if (pid < 0) return -1;
     if (pid == 0) {
-        /* Child: set up stdin/stdout */
+        // Child process, set up stdin/stdout
         if (in_fd != STDIN_FILENO) {
             dup2(in_fd, STDIN_FILENO);
             close(in_fd);
@@ -449,7 +445,7 @@ pid_t spawn_command(char **cmd, int in_fd, int out_fd, int bg, int *all_pipes, i
             close(out_fd);
         }
 
-        /* Close all pipe fds inherited from parent */
+        // Close all pipe fds inherited from parent
         if (all_pipes) {
             for (int i = 0; i < all_pipes_len; ++i) {
                 if (all_pipes[i] >= 0) close(all_pipes[i]);
@@ -468,7 +464,7 @@ int mult_pipes(struct cmdline *l){
     int n = count_commands(l);
     if (n <= 0) return EXIT_SUCCESS;
     if (n == 1) {
-        /* fallback to single command */
+        // Fallback to single command
         char **cmd = l->seq[0];
         int out_fd = wr_to_file(l);
         int in_fd = rd_from_file(l);
@@ -479,22 +475,22 @@ int mult_pipes(struct cmdline *l){
         return r;
     }
 
-    /* create pipes: (n-1) pipes => (n-1)*2 fds */
+    // Create pipes: (n-1) pipes => (n-1) * 2 fds
     int pipes_count = n - 1;
     int *pipes = malloc(sizeof(int) * pipes_count * 2);
     if (!pipes) return EXIT_FAILURE;
     for (int i = 0; i < pipes_count; ++i) {
         if (pipe(&pipes[i*2]) == -1) {
             perror("pipe");
-            /* cleanup previously created pipes */
+            // Cleanup previously created pipes
             for (int j = 0; j < i; ++j) { close(pipes[j*2]); close(pipes[j*2+1]); }
             free(pipes);
             return EXIT_FAILURE;
         }
     }
 
-    /* compute child pids */
-    //make space for children
+    // Compute child pids
+    // Make space for children
     pid_t *pids = malloc(sizeof(pid_t) * n);
     if (!pids) { free(pipes); return EXIT_FAILURE; }
 
@@ -503,23 +499,23 @@ int mult_pipes(struct cmdline *l){
         if (i == 0) {
             in_fd = rd_from_file(l);
         } else {
-            in_fd = pipes[(i-1)*2]; /* read end of previous pipe */
+            in_fd = pipes[(i-1)*2]; // Read end of previous pipe
         }
         if (i == n-1) {
             out_fd = wr_to_file(l);
         } else {
-            out_fd = pipes[i*2 + 1]; /* write end of current pipe */
+            out_fd = pipes[i*2 + 1]; // Write end of current pipe
         }
 
         if (in_fd == -1 || out_fd == -1) {
-            /* cleanup: close opened fds and pipes */
+            // Close opened fds and pipes
             for (int k = 0; k < pipes_count; ++k) { close(pipes[k*2]); close(pipes[k*2+1]); }
             free(pipes);
             free(pids);
             return EXIT_FAILURE;
         }
 
-        /* Spawn the command; pass all pipe fds so child can close unused ones */
+        // Spawn the command, pass all pipe fds so child can close unused ones
         pids[i] = spawn_command(l->seq[i], in_fd, out_fd, l->bg, pipes, pipes_count*2);
         if (pids[i] < 0) {
             perror("fork");
@@ -530,24 +526,25 @@ int mult_pipes(struct cmdline *l){
             return EXIT_FAILURE;
         }
 
-        /* Parent closes fds it no longer needs: after spawning child i,
-           the parent can close the read end of previous pipe and the write
-           end of current pipe if they won't be used further. */
+        /* After spawning each child, parent closes pipe ends it no longer needs:
+        the read end of the previous pipe and the write end of the current pipe. */
         if (i > 0) {
-            close(pipes[(i-1)*2]); /* previous read end */
+             // Previous read end
+            close(pipes[(i-1)*2]);
         }
         if (i < n-1) {
-            close(pipes[i*2 + 1]); /* write end used by child; parent can close it */
+            // Write end used by child; parent can close it
+            close(pipes[i*2 + 1]);
         }
 
-        /* Also close redirection fds in parent if set for first/last cmds */
+        // Close redirection fds in parent if set for first/last cmds
         if (i == 0 && in_fd != STDIN_FILENO) close(in_fd);
         if (i == n-1 && out_fd != STDOUT_FILENO) close(out_fd);
     }
 
-    /* parent: close any remaining pipe fds */
+    // Parent closes any remaining pipe fds
     for (int k = 0; k < pipes_count; ++k) {
-        /* safe to close; some may already be closed */
+        // Close remaining pipe fds
         if (pipes[k*2] >= 0) close(pipes[k*2]);
         if (pipes[k*2+1] >= 0) close(pipes[k*2+1]);
     }
@@ -557,7 +554,7 @@ int mult_pipes(struct cmdline *l){
     if (!l->bg) {
         for (int i = 0; i < n; ++i) waitpid(pids[i], NULL, 0);
     } else {
-        /* background: add first child as job */
+        // If running in the background, add only the first command as a job
         add_job(pids[0], l->seq[0][0], l->seq[0]);
     }
 
