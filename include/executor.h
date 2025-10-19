@@ -23,8 +23,12 @@ typedef struct {
 
 
 void add_job(pid_t pid, char* cmd, char** args);
+int execute_pipe(struct cmdline *l);
 void cleanup_finished_jobs(void);
 void print_jobs(void);
 int wr_to_file(struct cmdline *l);
 int rd_from_file(struct cmdline *l);
+pid_t spawn_command(char **args, int in_fd, int out_fd, int bg, int *all_pipes, int all_pipes_len);
+int mult_pipes(struct cmdline *l);
+int count_commands(struct cmdline *l);
 #endif //EXECUTOR_H

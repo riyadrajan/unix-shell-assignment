@@ -7,7 +7,9 @@
 #include <string.h>
 
 #include "executor.h"
-
+/*
+double check if we need the background process implementation in spawn command (dont think so)
+*/
 
 /*
 Notes: Work on logic to assign status of job (running, done, etc.)
@@ -113,6 +115,16 @@ int execute(struct cmdline *l){
         print_jobs();
         return EXIT_SUCCESS;
     }
+
+    //if pipe "|" detected for two commands ONLY, call execute_pipe func 
+    //after adding multpipe function, use count_commands
+    //call mult_pipe if multiple pipes/commands
+
+    int pipe_num = count_commands(l);
+    if (pipe_num <= 0) return EXIT_SUCCESS;
+    if (pipe_num == 2) return execute_pipe(l);
+    if (pipe_num > 2)  return mult_pipes(l);
+    //if pipe_num is 1 just continue below as normal
 
     //get first command
     char **cmd = l->seq[0];
@@ -287,4 +299,268 @@ int rd_from_file(struct cmdline *l){
         }
     }
     return STDIN_FILENO;
+}
+
+//---------------------------PIPE (FOR 2 CMDS)---------------------------
+//notes: one end of the pipe writes and the other reads from the pipe (connecting two cmds)
+//write -> pipefd[0]
+//read -> pipefd[1]
+
+/*
+how it works:
+instead of writing to the terminal, write output to a file
+read from file and use for next command
+so we need two process creations in this func
+bypass calling execute_command()
+*/
+
+int execute_pipe(struct cmdline *l) {
+    if (!l || !l->seq || !l->seq[0] || !l->seq[1]) return EXIT_FAILURE;
+
+    //get cmds from seq array
+    char **cmd1 = l->seq[0];
+    char **cmd2 = l->seq[1];
+    if (cmd1 == NULL || cmd2 == NULL) return EXIT_FAILURE;
+
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        fprintf(stderr, "pipe");
+        return EXIT_FAILURE;
+    }
+
+    // Open redirection files: input applies to first command, output to second 
+    int input_fd = rd_from_file(l);
+    int output_fd = wr_to_file(l);
+    if (input_fd == -1 || output_fd == -1) {
+        if (input_fd != STDIN_FILENO && input_fd != -1) close(input_fd);
+        if (output_fd != STDOUT_FILENO && output_fd != -1) close(output_fd);
+        close(pipefd[0]); close(pipefd[1]);
+        return EXIT_FAILURE;
+    }
+
+    //only add functionality to child processes
+    //if parent process or otherwise, close files
+    pid_t p1 = fork();
+    if (p1 < 0) {
+        fprintf(stderr, "pipe");
+        close(pipefd[0]); 
+        close(pipefd[1]);
+        if (input_fd != STDIN_FILENO) close(input_fd);
+        if (output_fd != STDOUT_FILENO) close(output_fd);
+        return EXIT_FAILURE;
+    }
+
+    //output from cmd1 (so write for pipe)
+    if (p1 == 0) {
+        // Child 1: stdin <- input_fd, stdout -> pipe write end 
+        if (input_fd != STDIN_FILENO) {
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
+        }
+        dup2(pipefd[1], STDOUT_FILENO);
+        //close unused write and close original read
+        close(pipefd[0]); 
+        close(pipefd[1]);
+        if (output_fd != STDOUT_FILENO) close(output_fd);
+        execvp(cmd1[0], cmd1);
+        fprintf(stderr, "execvp failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    //cleanup for parent, same as above
+    pid_t p2 = fork();
+    if (p2 < 0) {
+        fprintf(stderr, "pipe");
+        close(pipefd[0]); 
+        close(pipefd[1]);
+        if (input_fd != STDIN_FILENO) close(input_fd);
+        if (output_fd != STDOUT_FILENO) close(output_fd);
+        return EXIT_FAILURE;
+    }
+
+    //input for cmd2 (so read from pipe)
+    if (p2 == 0) {
+        //Child 2: stdin <- pipe read end, stdout -> output_fd 
+        if (output_fd != STDOUT_FILENO) {
+            dup2(output_fd, STDOUT_FILENO);
+            close(output_fd);
+        }
+        dup2(pipefd[0], STDIN_FILENO);
+        //close unused write and close original read file
+        close(pipefd[0]); 
+        close(pipefd[1]);
+        if (input_fd != STDIN_FILENO) close(input_fd);
+        execvp(cmd2[0], cmd2);
+        fprintf(stderr, "execvp failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    //Parent: close fds used for piping and redirection 
+    close(pipefd[0]); 
+    close(pipefd[1]);
+    if (input_fd != STDIN_FILENO) close(input_fd);
+    if (output_fd != STDOUT_FILENO) close(output_fd);
+
+    if (!l->bg) {
+        waitpid(p1, NULL, 0);
+        waitpid(p2, NULL, 0);
+    } else {
+        //background: add first child as a job
+        printf("Background process is running \n");
+        add_job(p1, cmd1[0], cmd1);
+        printf("[%d] %d\n", (int)p1, (int)p1);
+    }
+
+    return EXIT_SUCCESS;
+}
+
+//-------------------------MULTIPLE-PIPE-----------------------
+/*
+note to self: to create multiple pipes, you need to know the amount of commands
+use a loop to determine how many commands or how many pipes
+set up pipeline with the loop 
+create an array stucture of all pipe pairs (fds)
+create a command spawn_command to execute a single command with specified in/out fds
+ensure the child closes all pipe fds that it does not need
+*/
+
+//count number of commands
+//get size of sequence
+int count_commands(struct cmdline *l) {
+    //return 0 if cmdline is empty 
+    if (!l || !l->seq) return 0;
+    int n = 0;
+    while (l->seq[n]) ++n;
+    return n;
+}
+//if n=2 call execute_pipe()
+
+pid_t spawn_command(char **cmd, int in_fd, int out_fd, int bg, int *all_pipes, int all_pipes_len) {
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        /* Child: set up stdin/stdout */
+        if (in_fd != STDIN_FILENO) {
+            dup2(in_fd, STDIN_FILENO);
+            close(in_fd);
+        }
+        if (out_fd != STDOUT_FILENO) {
+            dup2(out_fd, STDOUT_FILENO);
+            close(out_fd);
+        }
+
+        /* Close all pipe fds inherited from parent */
+        if (all_pipes) {
+            for (int i = 0; i < all_pipes_len; ++i) {
+                if (all_pipes[i] >= 0) close(all_pipes[i]);
+            }
+        }
+
+        execvp(cmd[0], cmd);
+        fprintf(stderr, "execvp failed\n");
+        exit(EXIT_FAILURE);
+    }
+    return pid;
+}
+
+
+int mult_pipes(struct cmdline *l){
+    int n = count_commands(l);
+    if (n <= 0) return EXIT_SUCCESS;
+    if (n == 1) {
+        /* fallback to single command */
+        char **cmd = l->seq[0];
+        int out_fd = wr_to_file(l);
+        int in_fd = rd_from_file(l);
+        if (in_fd == -1 || out_fd == -1) return EXIT_FAILURE;
+        int r = execute_command(cmd[0], cmd, in_fd, out_fd, l->bg);
+        if (out_fd != STDOUT_FILENO) close(out_fd);
+        if (in_fd != STDIN_FILENO) close(in_fd);
+        return r;
+    }
+
+    /* create pipes: (n-1) pipes => (n-1)*2 fds */
+    int pipes_count = n - 1;
+    int *pipes = malloc(sizeof(int) * pipes_count * 2);
+    if (!pipes) return EXIT_FAILURE;
+    for (int i = 0; i < pipes_count; ++i) {
+        if (pipe(&pipes[i*2]) == -1) {
+            perror("pipe");
+            /* cleanup previously created pipes */
+            for (int j = 0; j < i; ++j) { close(pipes[j*2]); close(pipes[j*2+1]); }
+            free(pipes);
+            return EXIT_FAILURE;
+        }
+    }
+
+    /* compute child pids */
+    //make space for children
+    pid_t *pids = malloc(sizeof(pid_t) * n);
+    if (!pids) { free(pipes); return EXIT_FAILURE; }
+
+    for (int i = 0; i < n; ++i) {
+        int in_fd, out_fd;
+        if (i == 0) {
+            in_fd = rd_from_file(l);
+        } else {
+            in_fd = pipes[(i-1)*2]; /* read end of previous pipe */
+        }
+        if (i == n-1) {
+            out_fd = wr_to_file(l);
+        } else {
+            out_fd = pipes[i*2 + 1]; /* write end of current pipe */
+        }
+
+        if (in_fd == -1 || out_fd == -1) {
+            /* cleanup: close opened fds and pipes */
+            for (int k = 0; k < pipes_count; ++k) { close(pipes[k*2]); close(pipes[k*2+1]); }
+            free(pipes);
+            free(pids);
+            return EXIT_FAILURE;
+        }
+
+        /* Spawn the command; pass all pipe fds so child can close unused ones */
+        pids[i] = spawn_command(l->seq[i], in_fd, out_fd, l->bg, pipes, pipes_count*2);
+        if (pids[i] < 0) {
+            perror("fork");
+            /* cleanup */
+            for (int k = 0; k < pipes_count; ++k) { close(pipes[k*2]); close(pipes[k*2+1]); }
+            free(pipes); 
+            free(pids);
+            return EXIT_FAILURE;
+        }
+
+        /* Parent closes fds it no longer needs: after spawning child i,
+           the parent can close the read end of previous pipe and the write
+           end of current pipe if they won't be used further. */
+        if (i > 0) {
+            close(pipes[(i-1)*2]); /* previous read end */
+        }
+        if (i < n-1) {
+            close(pipes[i*2 + 1]); /* write end used by child; parent can close it */
+        }
+
+        /* Also close redirection fds in parent if set for first/last cmds */
+        if (i == 0 && in_fd != STDIN_FILENO) close(in_fd);
+        if (i == n-1 && out_fd != STDOUT_FILENO) close(out_fd);
+    }
+
+    /* parent: close any remaining pipe fds */
+    for (int k = 0; k < pipes_count; ++k) {
+        /* safe to close; some may already be closed */
+        if (pipes[k*2] >= 0) close(pipes[k*2]);
+        if (pipes[k*2+1] >= 0) close(pipes[k*2+1]);
+    }
+
+    free(pipes);
+
+    if (!l->bg) {
+        for (int i = 0; i < n; ++i) waitpid(pids[i], NULL, 0);
+    } else {
+        /* background: add first child as job */
+        add_job(pids[0], l->seq[0][0], l->seq[0]);
+    }
+
+    free(pids);
+    return EXIT_SUCCESS;
 }
